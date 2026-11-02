@@ -1,0 +1,32 @@
+[Unit]
+Description=MindPanel agent
+Documentation=https://panel.minddev.nl
+After=network-online.target
+Wants=network-online.target
+# Fatal configuration or credential errors exit the agent; do not restart forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=mindpanel-agent
+Group=mindpanel-agent
+EnvironmentFile=/etc/mindpanel-agent/agent.env
+ExecStart=/usr/bin/node /opt/mindpanel-agent/dist/index.js
+Restart=always
+RestartSec=5
+StateDirectory=mindpanel-agent
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mindpanel-agent
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+# MemoryDenyWriteExecute is intentionally not enabled: V8's JIT needs to map
+# executable code pages, and Node crashes under that restriction.
+
+[Install]
+WantedBy=multi-user.target

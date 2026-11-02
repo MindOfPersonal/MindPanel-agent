@@ -1,0 +1,9 @@
+{
+  "MINDPANEL_URL": "https://panel.example.com",
+  "REGISTRATION_CODE": "mpreg_replace-with-the-one-time-code",
+  "AGENT_STATE_FILE": "/var/lib/mindpanel-agent/state.json",
+  "HEARTBEAT_INTERVAL_SECONDS": 15,
+  "STATS_INTERVAL_SECONDS": 5,
+  "REQUEST_TIMEOUT_SECONDS": 15,
+  "LOG_LEVEL": "info"
+}
