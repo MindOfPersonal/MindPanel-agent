@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { decodeMountField, parseBootTime, parseCpuTimes, parseProcessStat } from './linux.js';
+import {
+  decodeMountField,
+  isPhysicalDiskDevice,
+  parseBootTime,
+  parseCpuTimes,
+  parseDiskStats,
+  parseProcessStat,
+} from './linux.js';
 
 describe('Linux collector parsing', () => {
   it('parses aggregate CPU times from /proc/stat', () => {
@@ -36,5 +43,40 @@ describe('Linux collector parsing', () => {
   it('decodes escaped mountpoint characters', () => {
     expect(decodeMountField('/mnt/my\\040disk')).toBe('/mnt/my disk');
     expect(decodeMountField('/mnt/back\\134slash')).toBe('/mnt/back\\slash');
+  });
+
+  it('parses disk counters in 512-byte sectors', () => {
+    const raw = [
+      '   8       0 sda 100 0 2048 10 50 0 1024 20 0 40 0',
+      '   8       1 sda1 10 0 100 5 5 0 50 5 0 20 0',
+      '   7       0 loop0 1 0 2 0 1 0 2 0 0 0 0',
+      '259       0 nvme0n1 5 0 1000 1 6 0 3000 1 0 10 0',
+      '259       1 nvme0n1p1 1 0 100 1 1 0 100 1 0 10 0',
+    ].join('\n');
+
+    const totals = parseDiskStats(raw);
+
+    expect(totals.get('sda')).toEqual({
+      readBytesTotal: 2048 * 512,
+      writeBytesTotal: 1024 * 512,
+    });
+    expect(totals.has('sda1')).toBe(false);
+    expect(totals.has('loop0')).toBe(false);
+    expect(totals.get('nvme0n1')).toEqual({
+      readBytesTotal: 1000 * 512,
+      writeBytesTotal: 3000 * 512,
+    });
+    expect(totals.has('nvme0n1p1')).toBe(false);
+  });
+
+  it('recognises whole disks and rejects partitions', () => {
+    expect(isPhysicalDiskDevice('sda')).toBe(true);
+    expect(isPhysicalDiskDevice('vdb')).toBe(true);
+    expect(isPhysicalDiskDevice('nvme0n1')).toBe(true);
+    expect(isPhysicalDiskDevice('mmcblk0')).toBe(true);
+    expect(isPhysicalDiskDevice('sda1')).toBe(false);
+    expect(isPhysicalDiskDevice('nvme0n1p1')).toBe(false);
+    expect(isPhysicalDiskDevice('loop0')).toBe(false);
+    expect(isPhysicalDiskDevice('dm-0')).toBe(false);
   });
 });

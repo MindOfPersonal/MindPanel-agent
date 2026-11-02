@@ -92,6 +92,7 @@ npm run format:check
 - Load average
 - Uptime
 - Disk usage per real mountpoint
+- Disk I/O per physical disk (read and write rate, plus cumulative counters)
 - Network interfaces, addresses, totals and rates
 - System information (hostname, OS, kernel, architecture, CPU model/cores, total memory, timezone)
 - Top processes by CPU and memory (PID, name, user, CPU, memory, state, start time, command line
@@ -155,7 +156,7 @@ All agent endpoints are under `/api/v1/agents` and use JSON.
 
 Every message includes `protocolVersion` (currently `1`). Registration and heartbeat messages carry
 system information; metrics messages carry a `metrics` object (CPU, memory, swap, load, uptime,
-disks, networks, process count) and a bounded `processes` array.
+disks, disk I/O, networks, process count) and a bounded `processes` array.
 
 The authoritative field-level schemas live in
 [`packages/shared/src/protocol.ts`](https://github.com/MindOfPersonal/MindPanel/blob/master/packages/shared/src/protocol.ts)

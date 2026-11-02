@@ -17,7 +17,7 @@ import { logger, setLogLevel } from './logger.js';
 import { loadState, saveState } from './state.js';
 import type { AgentState } from './state.js';
 
-const AGENT_VERSION = '0.1.0';
+const AGENT_VERSION = '0.2.0';
 const MAX_RETRY_DELAY_MS = 60_000;
 
 class FatalAgentError extends Error {}

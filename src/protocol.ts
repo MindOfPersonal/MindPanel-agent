@@ -57,6 +57,14 @@ export const diskMetricSchema = z.object({
   usedPercent: percentage,
 });
 
+export const diskIoMetricSchema = z.object({
+  device: z.string().trim().min(1).max(64),
+  readBytesPerSecond: nonNegativeNumber,
+  writeBytesPerSecond: nonNegativeNumber,
+  readBytesTotal: byteCount,
+  writeBytesTotal: byteCount,
+});
+
 export const networkMetricSchema = z.object({
   interface: z.string().trim().min(1).max(64),
   addresses: z.array(z.string().trim().max(64)).max(20),
@@ -94,6 +102,7 @@ export const agentMetricsSchema = z.object({
     load15: nonNegativeNumber.optional(),
     uptimeSeconds: byteCount,
     disks: z.array(diskMetricSchema).max(50),
+    diskIo: z.array(diskIoMetricSchema).max(50).optional(),
     networks: z.array(networkMetricSchema).max(50),
     processCount: z.number().int().min(0).max(1_000_000),
   }),
@@ -104,6 +113,7 @@ export type AgentRegistrationRequest = z.infer<typeof agentRegistrationSchema>;
 export type AgentHeartbeatRequest = z.infer<typeof agentHeartbeatSchema>;
 export type AgentMetricsRequest = z.infer<typeof agentMetricsSchema>;
 export type DiskMetric = z.infer<typeof diskMetricSchema>;
+export type DiskIoMetric = z.infer<typeof diskIoMetricSchema>;
 export type NetworkMetric = z.infer<typeof networkMetricSchema>;
 export type ProcessMetric = z.infer<typeof processMetricSchema>;
 export type AgentMetricsPayload = AgentMetricsRequest['metrics'];

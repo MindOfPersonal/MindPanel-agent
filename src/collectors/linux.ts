@@ -2,16 +2,19 @@ import { readFile, readdir, statfs } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import type { DiskMetric, NetworkMetric, ProcessMetric } from '../protocol.js';
+import type { DiskIoMetric, DiskMetric, NetworkMetric, ProcessMetric } from '../protocol.js';
 
 import type { Collector, MetricsSnapshot, SystemInfo } from './types.js';
 
 const CLOCK_TICKS_PER_SECOND = 100;
 const DEFAULT_PAGE_SIZE = 4096;
 const MAX_DISKS = 50;
+const MAX_DISK_IO_DEVICES = 20;
 const MAX_NETWORKS = 50;
 const TOP_PROCESS_LIMIT = 50;
 const MAX_PROCESSES = 100;
+/** /proc/diskstats always reports sectors in 512-byte units. */
+const DISK_SECTOR_SIZE = 512;
 
 const REAL_FILESYSTEMS = new Set([
   'ext2',
@@ -48,6 +51,11 @@ export interface ProcessTicks {
 interface NetworkTotals {
   rx: number;
   tx: number;
+}
+
+export interface DiskIoTotals {
+  readBytesTotal: number;
+  writeBytesTotal: number;
 }
 
 export function decodeMountField(value: string): string {
@@ -93,6 +101,53 @@ function round(value: number, digits = 2): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Physical block devices only: whole disks are reported, partitions are not,
+ * because a partition is already part of its parent device.
+ */
+export function isPhysicalDiskDevice(name: string): boolean {
+  if (/^nvme\d+n\d+$/.test(name)) {
+    return true;
+  }
+  if (/^mmcblk\d+$/.test(name)) {
+    return true;
+  }
+  if (/^(sd|vd|xvd|hd)[a-z]*$/.test(name)) {
+    return !/\d$/.test(name);
+  }
+  return false;
+}
+
+/**
+ * Parses /proc/diskstats into cumulative byte counters per device. Sectors are
+ * always 512 bytes, independent of the device's logical block size.
+ */
+export function parseDiskStats(raw: string): Map<string, DiskIoTotals> {
+  const totals = new Map<string, DiskIoTotals>();
+
+  for (const line of raw.split('\n')) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 10) {
+      continue;
+    }
+    const name = fields[2];
+    if (!name || !isPhysicalDiskDevice(name)) {
+      continue;
+    }
+    const sectorsRead = Number(fields[5]);
+    const sectorsWritten = Number(fields[9]);
+    if (!Number.isFinite(sectorsRead) || !Number.isFinite(sectorsWritten)) {
+      continue;
+    }
+    totals.set(name, {
+      readBytesTotal: Math.max(0, sectorsRead) * DISK_SECTOR_SIZE,
+      writeBytesTotal: Math.max(0, sectorsWritten) * DISK_SECTOR_SIZE,
+    });
+  }
+
+  return totals;
 }
 
 export function parseCpuTimes(raw: string): CpuTimes | null {
@@ -209,6 +264,10 @@ export class LinuxCollector implements Collector {
 
   private previousNetworkAt: number | null = null;
 
+  private previousDiskIo = new Map<string, DiskIoTotals>();
+
+  private previousDiskIoAt: number | null = null;
+
   private users: Map<string, string> | null = null;
 
   private bootTime: number | null = null;
@@ -277,8 +336,9 @@ export class LinuxCollector implements Collector {
     const load = loadavgRaw?.trim().split(/\s+/) ?? [];
     const uptimeSeconds = Math.round(Number(uptimeRaw?.trim().split(/\s+/)[0] ?? os.uptime()));
 
-    const [disks, networks, processSnapshot] = await Promise.all([
+    const [disks, diskIo, networks, processSnapshot] = await Promise.all([
       this.collectDisks(),
+      this.collectDiskIo(),
       this.collectNetworks(),
       this.collectProcesses(cpuDelta, memoryTotalBytes),
     ]);
@@ -295,11 +355,57 @@ export class LinuxCollector implements Collector {
         load15: load[2] !== undefined ? Number(load[2]) : undefined,
         uptimeSeconds: Number.isFinite(uptimeSeconds) ? uptimeSeconds : 0,
         disks,
+        diskIo,
         networks,
         processCount: processSnapshot.processCount,
       },
       processes: processSnapshot.processes,
     };
+  }
+
+  private async collectDiskIo(): Promise<DiskIoMetric[]> {
+    const raw = await readText('/proc/diskstats');
+    if (!raw) {
+      return [];
+    }
+
+    const now = Date.now();
+    const elapsedSeconds =
+      this.previousDiskIoAt === null ? 0 : Math.max(0, (now - this.previousDiskIoAt) / 1000);
+    const totals = parseDiskStats(raw);
+    const metrics: DiskIoMetric[] = [];
+
+    for (const [device, current] of totals) {
+      const previous = this.previousDiskIo.get(device);
+      const readBytesPerSecond =
+        previous && elapsedSeconds > 0
+          ? Math.max(0, (current.readBytesTotal - previous.readBytesTotal) / elapsedSeconds)
+          : 0;
+      const writeBytesPerSecond =
+        previous && elapsedSeconds > 0
+          ? Math.max(0, (current.writeBytesTotal - previous.writeBytesTotal) / elapsedSeconds)
+          : 0;
+
+      metrics.push({
+        device,
+        readBytesPerSecond: Math.round(readBytesPerSecond),
+        writeBytesPerSecond: Math.round(writeBytesPerSecond),
+        readBytesTotal: Math.round(current.readBytesTotal),
+        writeBytesTotal: Math.round(current.writeBytesTotal),
+      });
+    }
+
+    this.previousDiskIo = totals;
+    this.previousDiskIoAt = now;
+
+    return metrics
+      .sort(
+        (left, right) =>
+          right.readBytesPerSecond +
+          right.writeBytesPerSecond -
+          (left.readBytesPerSecond + left.writeBytesPerSecond),
+      )
+      .slice(0, MAX_DISK_IO_DEVICES);
   }
 
   private async collectDisks(): Promise<DiskMetric[]> {

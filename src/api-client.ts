@@ -29,7 +29,7 @@ export async function postJson<T>(options: PostOptions): Promise<T> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     accept: 'application/json',
-    'user-agent': 'mindpanel-agent/0.1.0',
+    'user-agent': 'mindpanel-agent/0.2.0',
   };
   if (options.token) {
     headers.authorization = `Bearer ${options.token}`;
